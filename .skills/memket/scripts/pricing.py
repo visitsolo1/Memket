@@ -2,9 +2,8 @@
 """Compute the effective Memket price for a meme.
 
 Usage:
-    python pricing.py --base 0.05 --quotes 30 --age-hours 2
+    python3 pricing.py --base 0.05 --quotes 30 --age-hours 2
 """
-
 from __future__ import annotations
 
 import argparse

@@ -1,98 +1,74 @@
 ---
 name: memket
-description: Operate Memket, an agent-native meme market on Arc where AI agents price, list, buy, sell, and quote memes using USDC nanopayments. Use when the user mentions Memket, meme markets, meme pricing, meme-as-an-asset, agent-to-agent meme trading, or wants to launch/quote/buy/sell/list memes on Arc via Circle Gateway. Do NOT use for general crypto trading, NFT marketplaces, or non-Arc chains.
+description: Operate Memket, an agent-native meme market on Arc where AI agents price, list, buy, sell, and quote memes using USDC nanopayments via Circle Gateway. Use when the user mentions Memket, meme markets, meme pricing, meme-as-an-asset, agent-to-agent meme trading, or wants to launch/quote/buy/sell/list memes on Arc. Do NOT use for general crypto trading, NFT marketplaces, or non-Arc chains.
 ---
 
 # Memket
 
-Meme Market for AI agents. Built for the **Lepton Agents Hackathon** (Canteen × Circle on Arc, June 15–29, 2026). Every meme is a priced asset; every transaction settles as a USDC nanopayment on Arc.
+Meme Market for AI agents. Built for the **Lepton Agents Hackathon** (Canteen × Circle on Arc, June 15–29, 2026). Every meme is a priced asset; every transaction settles as a USDC nanopayment on Arc via Circle Gateway.
 
-## When the agent runs
+## Stack
 
-You are an **economic actor**, not a chat bot. Other agents will hit your endpoints, browse your listings, and pay you in USDC. You pay them the same way. Settlement is sub-second on Arc; fees are ~0.01 USDC.
+- **Arc** testnet — stablecoin-native L1, sub-second finality
+- **USDC** — `0x3600000000000000000000000000000000000000` on Arc
+- **Circle Gateway** — unified balance, domain id `26` for Arc testnet
+- **`arc_rpc.py`** — minimal JSON-RPC client for Arc (stdlib only)
+- **`circle_client.py`** — full Circle Gateway client (1100 lines, supports Arc)
+
+## Required env
+
+```bash
+EVM_PRIVATE_KEY=0x...          # your agent's wallet private key
+GATEWAY_API_KEY=...            # optional, higher rate limits
+CIRCLE_ENV=TESTNET
+GATEWAY_RPC_URL=https://rpc.testnet.arc-node.thecanteenapp.com/v1/<your-token>
+SOURCE_CHAIN_RPC_URL=$GATEWAY_RPC_URL
+```
 
 ## Core operations
 
 All ops return a JSON envelope: `{ "ok": bool, "data": ..., "err": "..." }`.
 
-| Op | Endpoint | Purpose |
+| Op | Implementation | Purpose |
 |---|---|---|
-| `list_meme` | `POST /memes` | List a meme for sale with price + media |
-| `quote` | `GET /memes/{id}/quote` | Return live price + spread to a buyer agent |
-| `buy` | `POST /memes/{id}/buy` | Pay USDC, receive meme ownership receipt |
-| `sell` | `POST /memes/{id}/sell` | Accept a buyer's offer, transfer ownership |
-| `search` | `GET /memes?q=&sort=` | Discover memes across the market |
-| `wallet` | `GET /me/wallet` | Show agent USDC balance + Arc address |
+| `list_meme` | local store + `CircleClient.get_balances()` | List a meme for sale |
+| `quote` | `pricing.py` formula, cached 60s | Return live price + spread |
+| `buy` | `CircleClient.transfer_usdc()` + arc `eth_getTransactionReceipt` | Pay USDC, transfer ownership |
+| `sell` | same path, reversed | Accept buyer's offer |
+| `search` | index across `.well-known/memket.json` peers | Discover memes |
+| `wallet` | `CircleClient.get_total_usdc_balance()` | Show USDC balance + Arc address |
 
 ## Pricing model
 
-Memes are priced in USDC with sub-cent precision. Arc supports this via Circle Gateway.
-
 ```
-price = base_price × virality_multiplier × novelty_decay
+effective_price = clamp(base × virality × novelty, 0.001, 1.00)  // USDC
 ```
 
-- `base_price` — floor set by lister (≥ 0.001 USDC)
-- `virality_multiplier` — derived from quotes-per-hour (1.0 → 5.0)
-- `novelty_decay` — `1 / (1 + hours_since_listed / 24)`
-
-Cap final price at `1.00 USDC` to keep everything in nanopayment range.
-
-See `references/pricing.md` for the full formula and worked examples.
+See `references/pricing.md` for full formula and worked examples.
 
 ## Nanopayment flow
 
-1. Buyer agent calls `/memes/{id}/quote` → gets `{ price_usdc, expires_at, quote_id }`.
-2. Buyer signs USDC transfer via Circle Gateway with `quote_id` as memo.
-3. Buyer calls `/memes/{id}/buy` with the transfer tx hash.
-4. Seller endpoint verifies on Arc, emits ownership receipt, updates listing.
-
-Do **not** batch settlements. Each meme trade is its own tx so fees stay at ~0.01 USDC.
+1. Buyer calls `quote()` → `{ price_usdc, quote_id, expires_at }`.
+2. Buyer signs USDC transfer via `CircleClient.create_transfer()` with `quote_id` as memo.
+3. Buyer submits via `CircleClient.mint_on_destination()`.
+4. Both sides poll `CircleClient.wait_for_receipt()` to confirm.
 
 Full sequence + error cases in `references/nanopayments.md`.
 
 ## Agent discovery
 
-Expose these so other Memket agents can find you:
-
-- `GET /.well-known/memket.json` — manifest with name, wallet, supported ops
-- `GET /memes?owner=me` — your live listings
-
-Register yourself in the Memket directory (see `references/discovery.md`) so peer agents can quote your inventory.
-
-## Output contract
-
-Every tool call or HTTP op returns:
-
-```json
-{
-  "ok": true,
-  "op": "quote",
-  "data": {
-    "meme_id": "mk_8f2a",
-    "price_usdc": "0.0423",
-    "quote_id": "qt_4d91",
-    "expires_at": "2026-06-27T16:42:00Z",
-    "spread_bps": 50
-  }
-}
-```
-
-On failure:
-
-```json
-{ "ok": false, "op": "buy", "err": "quote_expired", "retry_hint": "re-quote and retry" }
-```
+Serve `/.well-known/memket.json` and register with the directory. See `references/discovery.md`.
 
 ## Failure handling
 
-- `quote_expired` → call `/quote` again, retry once.
-- `insufficient_usdc` → surface balance from `/me/wallet`, ask the user to top up.
-- `arc_rpc_timeout` → retry with exponential backoff (max 3 attempts).
-- `forbidden` (this meme is not for sale) → suggest `/search` for alternatives.
+- `quote_expired` → re-quote, retry once
+- `insufficient_usdc` → `CircleClient.get_total_usdc_balance()` to surface balance
+- `arc_rpc_timeout` → exponential backoff via `ArcRPC.call()`, max 3
+- `forbidden` → suggest `search()`
 
 ## Boundaries
 
-- Do **not** execute trades without explicit user confirmation unless running in agent-to-agent mode where the user pre-authorized a budget.
-- Do **not** invent meme media. Use only URLs the user provides or assets fetched from a known source.
-- Do **not** route through chains other than Arc. Settlement on other L1s breaks the nanopayment model.
+- Confirm with user before executing trades (unless pre-authorized budget mode).
+- Don't invent meme media — only URLs the user provides.
+- Don't route through chains other than Arc.
+- Don't batch settlements — one meme = one tx keeps fees in nanopayment range.
