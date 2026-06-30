@@ -62,8 +62,11 @@ def spawn_agent(name: str, port: int, db_path: str) -> subprocess.Popen:
     info(f"spawning agent={name} on :{port} db={db_path}")
     log_path = f"/tmp/memket_two/{name}.log"
     log_f = open(log_path, "wb")
+    # Run uvicorn via the same python interpreter that ran the demo so we
+    # always have access to installed deps (u venvs without PATH inheritance).
     proc = subprocess.Popen(
-        ["uvicorn", "server:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
+        [sys.executable, "-m", "uvicorn", "server:app",
+         "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
         env=env, stdout=log_f, stderr=subprocess.STDOUT,
     )
     proc._log_f = log_f  # keep ref so file isn't closed

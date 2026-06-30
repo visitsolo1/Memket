@@ -1,5 +1,7 @@
 """Smoke test: verify Memket skill imports + Arc RPC without needing a funded wallet."""
-import sys, os
+import os
+import sys
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 sys.path.insert(0, HERE)
@@ -17,7 +19,14 @@ inp = PriceInputs(base_price=0.04, quotes_last_hour=12, hours_since_listed=2.0)
 print(f"demo price     = {effective_price(inp):.6f} USDC")
 print(f"demo spread    = {spread_bps(2.0)} bps")
 
-import circle_client
-print(f"arc domain id  = {int(circle_client.ChainDomain.ARC_TESTNET)}")
-print(f"arc USDC addr  = {circle_client.USDC_ADDRESSES[circle_client.ChainDomain.ARC_TESTNET]}")
+# Circle client is optional for smoke (requires requests + web3).
+try:
+    import circle_client  # type: ignore
+    print(f"arc domain id  = {int(circle_client.ChainDomain.ARC_TESTNET)}")
+    print(f"arc USDC addr  = {circle_client.USDC_ADDRESSES[circle_client.ChainDomain.ARC_TESTNET]}")
+    print("circle client  : ok")
+except ImportError as e:
+    print(f"circle client  : skipped ({e.__class__.__name__}: {e})")
+    print("                  (install -r requirements.txt to enable on-chain mode)")
+
 print("smoke ok")
