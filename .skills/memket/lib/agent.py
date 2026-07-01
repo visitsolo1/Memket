@@ -131,13 +131,12 @@ class MemketAgent:
         q = quote_for_meme(self.store, meme_id, meme.base_price_usdc)
         price_usdc = q["effective_price_usdc"]
 
-        # If a Circle client and on-chain tx are provided, defer settlement.
-        if self.circle is not None and tx_hash is not None:
-            # In a real deployment we'd wait_for_receipt(tx_hash, ...) here.
+        # If a real on-chain tx hash is provided by the buyer, stamp it on the receipt.
+        if tx_hash is not None:
             fee_usdc = "0.01"
             arc_tx = tx_hash
         else:
-            # Simulated settlement — still emits a receipt, just no real on-chain tx.
+            # No on-chain tx from the buyer — fall back to simulated settlement.
             fee_usdc = "0.01"
             arc_tx = None
 

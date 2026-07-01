@@ -51,7 +51,7 @@ def info(s: str) -> None:
     print(f"   {s}")
 
 
-def spawn_agent(name: str, port: int, db_path: str) -> subprocess.Popen:
+def spawn_agent(name: str, port: int, db_path: str, log_dir: str = "/tmp/memket_two") -> subprocess.Popen:
     env = os.environ.copy()
     env.update({
         "MEMKET_AGENT_NAME": name,
@@ -60,7 +60,8 @@ def spawn_agent(name: str, port: int, db_path: str) -> subprocess.Popen:
         "PYTHONPATH": LIB,
     })
     info(f"spawning agent={name} on :{port} db={db_path}")
-    log_path = f"/tmp/memket_two/{name}.log"
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = f"{log_dir}/{name}.log"
     log_f = open(log_path, "wb")
     # Run uvicorn via the same python interpreter that ran the demo so we
     # always have access to installed deps (u venvs without PATH inheritance).
